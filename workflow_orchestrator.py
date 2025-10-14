@@ -119,7 +119,6 @@ class WorkflowOrchestrator:
         # Step 2: Annotate each node with candidate executors
         for node_name, attrs in list(dag.nodes(data=True)):
             inputs, outputs = self._node_required_ios(attrs)
-            print("current:", inputs, outputs)
 
             # Ask library for candidate executors (library may return superset)
             try:
