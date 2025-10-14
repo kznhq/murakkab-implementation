@@ -1,6 +1,7 @@
 from workflow_dag_builder import *
 from executor_library import *
 from workflow_orchestrator import *
+from optimizer import *
 
 if __name__ == '__main__':
     # example workflow from paper
@@ -42,7 +43,7 @@ if __name__ == '__main__':
         inputs=['audio'],
         outputs=['transcript'],
         parameters={'language': 'str', 'beam_size': 'int'},
-        resources={'device': 'gpu', 'memory_gb': '12'}
+        resources={'device': 'gpu', 'memory_gb': '12'} # this is the minimum requirements to run the executor, not the profiling (profiling is separate as shown later)
     )
     opencv_executor = Executor(
         id='opencv-scene-detect',
@@ -92,3 +93,44 @@ if __name__ == '__main__':
     edges = list(logical_dag.edges(data=True))
     for edge in edges:
         print(edge)
+
+    # separator line
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+
+    # Optimizer will choose best executors given our constraints
+
+    # profiles of each executor kept here instead of library (numbers here just made up for sake of example)
+    model_profiles = {
+        "whisper-v3": {"latency_ms": 400, "accuracy": 0.94, "cost": 0.03, "device": "gpu"},
+        "opencv-scene-detect": {"latency_ms": 800, "accuracy": 0.91, "cost": 0.05, "device": "gpu"},
+        "frame-extractor": {"latency_ms": 700, "accuracy": 0.97, "cost": 0.04, "device": "gpu"},
+        "yolov8-object-detect": {"latency_ms": 700, "accuracy": 0.93, "cost": 0.04, "device": "gpu"},
+        "llama-3.2": {"latency_ms": 900, "accuracy": 0.98, "cost": 0.09, "device": "gpu"}
+    }
+
+    # Our hardware constraints (numbers here made up for sake of example)
+    hardware_resources = {"cpu": {"count": 8}, "gpu": {"count": 1}}
+
+    # Optimize workflow (slos numbers are just made up for sake of example)
+    optimizer = WorkflowOptimizer(model_profiles, hardware_resources)
+    slos = {"latency_ms": 4000, "accuracy": 0.9, "cost": 0.3}
+
+    executable_dag = optimizer.optimize(logical_dag, slos)
+
+    # 6. Display final executable DAG
+    print("\n=== Executable Workflow Plan ===")
+    for n, data in executable_dag.nodes(data=True):
+        print(f"Task: {n}")
+        print(f"  Executor: {data['selected_executor']} ({data['executor_type']})")
+        print(f"  Hardware: {data['hardware']}")
+        print(f"  Latency: {data['estimated_latency_ms']} ms")
+        print(f"  Accuracy: {data['estimated_accuracy']}")
+        print(f"  Cost: {data['estimated_cost']}")
+        print("  Params:", data.get("parameters", {}))
+        print()
+
+    print("=== Workflow Summary ===")
+    print(executable_dag.graph["summary"])
+
+    # separator line
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
