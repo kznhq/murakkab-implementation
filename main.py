@@ -117,7 +117,7 @@ if __name__ == '__main__':
 
     executable_dag = optimizer.optimize(logical_dag, slos)
 
-    # 6. Display final executable DAG
+    # Display final executable DAG
     print("\n=== Executable Workflow Plan ===")
     for n, data in executable_dag.nodes(data=True):
         print(f"Task: {n}")
