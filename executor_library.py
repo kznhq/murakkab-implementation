@@ -79,8 +79,8 @@ class ExecutorLibrary:
     def query_executors(
         self,
         type: Optional[str] = None,
-        input_type: Optional[str] = None,
-        output_type: Optional[str] = None
+        input_type: Optional[List[str]] = None,
+        output_type: Optional[List[str]] = None
     ) -> List[Executor]:
         """
         Query executors by type, input type, or output type.
@@ -98,9 +98,9 @@ class ExecutorLibrary:
         if type:
             results = [ex for ex in results if ex.type == type]
         if input_type:
-            results = [ex for ex in results if input_type in ex.inputs]
+            results = [ex for ex in results if input_type == ex.inputs]
         if output_type:
-            results = [ex for ex in results if output_type in ex.outputs]
+            results = [ex for ex in results if output_type == ex.outputs]
 
         return results
 
@@ -118,23 +118,50 @@ class ExecutorLibrary:
 if __name__ == "__main__":
     exec_lib = ExecutorLibrary()
 
-    # Register a new executor
     whisper_executor = Executor(
         id='whisper-v3',
         type='mlmodel',
         inputs=['audio'],
-        outputs=['text'],
+        outputs=['transcript'],
         parameters={'language': 'str', 'beam_size': 'int'},
         resources={'device': 'gpu', 'memory_gb': '12'}
     )
+    opencv_executor = Executor(
+        id='opencv-scene-detect',
+        type='tool',
+        inputs=['video'],
+        outputs=['scenes', 'audio']
+    )
+    frame_extractor_executor = Executor(
+        id='frame-extractor',
+        type='tool',
+        inputs=['scenes'],
+        outputs=['frames']
+    )
+    object_detector_executor = Executor(
+        id='yolov8-object-detect',
+        type='mlmodel',
+        inputs=['frames'],
+        outputs=['objframes']
+    )
+    llama_executor = Executor(
+        id='llama-3.2',
+        type='llm',
+        inputs=['query', 'transcript', 'objframes'],
+        outputs=['answer']
+    )
     exec_lib.register_executor(whisper_executor)
+    exec_lib.register_executor(opencv_executor)
+    exec_lib.register_executor(frame_extractor_executor)
+    exec_lib.register_executor(object_detector_executor)
+    exec_lib.register_executor(llama_executor)
 
     # Retrieve by ID
-    retrieved = exec_lib.get_executor_by_id('whisper-v3')
+    retrieved = exec_lib.get_executor_by_id('frame-extractor')
     print(f"Retrieved Executor: {retrieved}")
 
     # Query by input type
-    audio_executors = exec_lib.query_executors(input_type='audio')
+    audio_executors = exec_lib.query_executors(input_type=['audio'], output_type=['text', 'frames'])
     print(f"Executors that accept audio: {[e.id for e in audio_executors]}")
 
     # List all executors
