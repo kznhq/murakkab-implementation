@@ -22,7 +22,7 @@ if __name__ == '__main__':
         ]
     }
 
-    # build the generic DAG from the workflow
+    # build the generic DAG from the workflow (this is not a step in Murakkab, just a helper function so here I'm just calling it so we can see the generic DAG)
     dag = build_workflow_dag(video_qa_workflow)
     print("Workflow DAG successfully built:")
     print("Nodes:")
