@@ -25,13 +25,13 @@ if __name__ == '__main__':
     dag = build_workflow_dag(video_qa_workflow)
     print("Workflow DAG successfully built:")
     print("Nodes:")
-    nodes = logical_dag.nodes(data=True)
+    nodes = dag.nodes(data=True)
     for node in nodes:
         print(node)
-    print("Nodes:", logical_dag.nodes(data=True))
-    print("Edges:", list(logical_dag.edges(data=True)))
+    print("Nodes:", dag.nodes(data=True))
+    print("Edges:", list(dag.edges(data=True)))
     print("Edges:")
-    edges = list(logical_dag.edges(data=True))
+    edges = list(dag.edges(data=True))
     for edge in edges:
         print(edge)
 
