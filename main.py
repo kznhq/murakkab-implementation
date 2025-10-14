@@ -28,8 +28,6 @@ if __name__ == '__main__':
     nodes = dag.nodes(data=True)
     for node in nodes:
         print(node)
-    print("Nodes:", dag.nodes(data=True))
-    print("Edges:", list(dag.edges(data=True)))
     print("Edges:")
     edges = list(dag.edges(data=True))
     for edge in edges:
@@ -91,8 +89,6 @@ if __name__ == '__main__':
     nodes = logical_dag.nodes(data=True)
     for node in nodes:
         print(node)
-    print("Nodes:", logical_dag.nodes(data=True))
-    print("Edges:", list(logical_dag.edges(data=True)))
     print("Edges:")
     edges = list(logical_dag.edges(data=True))
     for edge in edges:
