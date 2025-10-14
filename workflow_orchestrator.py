@@ -129,7 +129,6 @@ class WorkflowOrchestrator:
 
             # Filter strictly to executors that actually cover required IO
             candidates = self._filter_executors_strict(candidates_raw, inputs, outputs)
-            print(candidates, candidates_raw)
 
             if not candidates:
                 # Build a helpful message including what the library returned (if any)
