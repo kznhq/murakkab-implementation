@@ -24,8 +24,16 @@ if __name__ == '__main__':
     # build the generic DAG from the workflow
     dag = build_workflow_dag(video_qa_workflow)
     print("Workflow DAG successfully built:")
-    print("Nodes:", dag.nodes(data=True))
-    print("Edges:", list(dag.edges(data=True)))
+    print("Nodes:")
+    nodes = logical_dag.nodes(data=True)
+    for node in nodes:
+        print(node)
+    print("Nodes:", logical_dag.nodes(data=True))
+    print("Edges:", list(logical_dag.edges(data=True)))
+    print("Edges:")
+    edges = list(logical_dag.edges(data=True))
+    for edge in edges:
+        print(edge)
 
     # register some executors
     exec_lib = ExecutorLibrary()
@@ -79,5 +87,13 @@ if __name__ == '__main__':
     orchestrator = WorkflowOrchestrator(exec_lib)
     logical_dag = orchestrator.build_logical_plan(video_qa_workflow)
     print("Logical DAG successfully built:")
+    print("Nodes:")
+    nodes = logical_dag.nodes(data=True)
+    for node in nodes:
+        print(node)
     print("Nodes:", logical_dag.nodes(data=True))
     print("Edges:", list(logical_dag.edges(data=True)))
+    print("Edges:")
+    edges = list(logical_dag.edges(data=True))
+    for edge in edges:
+        print(edge)
