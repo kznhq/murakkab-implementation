@@ -3,7 +3,7 @@ from executor_library import *
 from workflow_orchestrator import *
 
 if __name__ == '__main__':
-    # example workflow
+    # example workflow from paper
     video_qa_workflow = {
         "nodes": [
             {"name": "scene_detector", "inputs": ["video"], "outputs": ["scenes", "audio"]},
@@ -76,7 +76,6 @@ if __name__ == '__main__':
 
     # all_executors = exec_lib.list_all_executors()
     # print(f"All executors: {[e.id for e in all_executors]}")
-
 
     # separator line
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
