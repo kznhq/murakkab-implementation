@@ -1,7 +1,7 @@
 """
 local_runtime_dispatcher.py
 
-LocalRuntimeDispatcher
+Dispatcher
 
 Executes an *executable* workflow DAG locally in topological order (with optional
 parallel execution of independent branches). This runtime simulates executor
@@ -9,7 +9,7 @@ invocation (no external code is launched), logs execution, enforces dependencies
 and returns the outputs of terminal nodes.
 
 Usage:
-    dispatcher = LocalRuntimeDispatcher()
+    dispatcher = Dispatcher()
     final_outputs = dispatcher.execute(executable_dag, input_payload)
 
 Author: ChatGPT (GPT-5 Thinking mini)
@@ -30,7 +30,7 @@ from networkx.algorithms.dag import topological_generations
 # Logging convenience: callers may configure logging as they wish. Provide a sane
 # default if not configured.
 # ------------------------------------------------------------------------------
-DEFAULT_LOGGER_NAME = "LocalRuntimeDispatcher"
+DEFAULT_LOGGER_NAME = "Dispatcher"
 
 
 def _ensure_logger(name: str = DEFAULT_LOGGER_NAME, level: int = logging.INFO) -> logging.Logger:
@@ -60,9 +60,9 @@ class ExecutionSimulationError(DispatchError):
 
 
 # ------------------------------------------------------------------------------
-# LocalRuntimeDispatcher
+# Dispatcher
 # ------------------------------------------------------------------------------
-class LocalRuntimeDispatcher:
+class Dispatcher:
     """
     Executes an executable workflow DAG locally in topological order.
 
@@ -347,7 +347,7 @@ if __name__ == "__main__":
     initial_inputs = {"videos": "roadtrip.mp4"}
 
     # Create dispatcher and run
-    dispatcher = LocalRuntimeDispatcher()
+    dispatcher = Dispatcher()
     final = dispatcher.execute(G, initial_inputs)
 
     print("\nFinal workflow outputs:")

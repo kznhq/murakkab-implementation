@@ -161,7 +161,7 @@ if __name__ == '__main__':
     initial_inputs = {"video": "roadtrip.mp4", "query": "Who is the person in the red dress?"}
 
     # Create dispatcher and run
-    dispatcher = LocalRuntimeDispatcher()
+    dispatcher = Dispatcher()
     final = dispatcher.execute(executable_dag, initial_inputs)
 
     print("\nFinal workflow outputs:")
