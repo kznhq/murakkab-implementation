@@ -1,7 +1,11 @@
+import sys
+import networkx as nx
+import logging
 from workflow_dag_builder import *
 from executor_library import *
 from workflow_orchestrator import *
 from optimizer import *
+from dispatcher import *
 
 if __name__ == '__main__':
     # example workflow from paper
@@ -43,7 +47,7 @@ if __name__ == '__main__':
         inputs=['audio'],
         outputs=['transcript'],
         parameters={'language': 'str', 'beam_size': 'int'},
-        resources={'device': 'gpu', 'memory_gb': '12'} # this is the minimum requirements to run the executor, not the profiling (profiling is separate as shown later)
+        resources={'device': 'gpu', 'memory_gb': '12'} # this is the minimum requirements to run the executor, not the profiling (profiling is separate as shown later). Also these numbers are arbitrary right now for sake of demo
     )
     opencv_executor = Executor(
         id='opencv-scene-detect',
@@ -134,3 +138,33 @@ if __name__ == '__main__':
 
     # separator line
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+
+    # Dispatcher to actually run the DAG
+
+    # Configure logging for demo
+    root_logger = logging.getLogger()
+    # Clear existing handlers to avoid duplicate handlers in environments that
+    # pre-configure logging (like some REPLs).
+    for h in list(root_logger.handlers):
+        root_logger.removeHandler(h)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="[%(levelname)s] %(asctime)s - %(name)s - %(message)s",
+        stream=sys.stdout,
+    )
+
+    # Basic DAG validation
+    if not nx.is_directed_acyclic_graph(executable_dag):
+        raise RuntimeError("Produced DAG contains a cycle, aborting.")
+
+    # Initial inputs to run the workflow on
+    initial_inputs = {"video": "roadtrip.mp4", "query": "Who is the person in the red dress?"}
+
+    # Create dispatcher and run
+    dispatcher = LocalRuntimeDispatcher()
+    final = dispatcher.execute(executable_dag, initial_inputs)
+
+    print("\nFinal workflow outputs:")
+    for k, v in final.items():
+        print(f" - {k}: {v}")
+
