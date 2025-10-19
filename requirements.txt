@@ -1,11 +1,1 @@
-pyyaml
 networkx
-transformers
-openai
-langchain
-pydantic
-pandas
-fastapi
-uvicorn
-psutil
-python-dotenv
