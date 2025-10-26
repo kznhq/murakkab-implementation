@@ -47,7 +47,7 @@ if __name__ == '__main__':
         inputs=['audio'],
         outputs=['transcript'],
         parameters={'language': 'str', 'beam_size': 'int'},
-        resources={'device': 'gpu', 'memory_gb': '12'} # this is the minimum requirements to run the executor, not the profiling (profiling is separate as shown later). Also these numbers are arbitrary right now for sake of demo
+        # resources={'device': 'gpu', 'memory_gb': '12'} # this is the minimum requirements to run the executor, not the profiling (profiling is separate as shown later). Also these numbers are arbitrary right now for sake of demo
     )
     opencv_executor = Executor(
         id='opencv-scene-detect',
@@ -73,11 +73,18 @@ if __name__ == '__main__':
         inputs=['query', 'transcript', 'objframes'],
         outputs=['answer']
     )
+    gpt_executor = Executor(
+        id='gpt-4o',
+        type='llm',
+        inputs=['query', 'transcript', 'objframes'],
+        outputs=['answer']
+    )
     exec_lib.register_executor(whisper_executor)
     exec_lib.register_executor(opencv_executor)
     exec_lib.register_executor(frame_extractor_executor)
     exec_lib.register_executor(object_detector_executor)
     exec_lib.register_executor(llama_executor)
+    exec_lib.register_executor(gpt_executor)
 
     # all_executors = exec_lib.list_all_executors()
     # print(f"All executors: {[e.id for e in all_executors]}")
@@ -109,7 +116,8 @@ if __name__ == '__main__':
         "opencv-scene-detect": {"latency_ms": 800, "accuracy": 0.91, "cost": 0.05, "device": "gpu"},
         "frame-extractor": {"latency_ms": 700, "accuracy": 0.97, "cost": 0.04, "device": "gpu"},
         "yolov8-object-detect": {"latency_ms": 700, "accuracy": 0.93, "cost": 0.04, "device": "gpu"},
-        "llama-3.2": {"latency_ms": 900, "accuracy": 0.98, "cost": 0.09, "device": "gpu"}
+        "llama-3.2": {"latency_ms": 1200, "accuracy": 0.85, "cost": 0.11, "device": "gpu"},
+        "gpt-4o": {"latency_ms": 900, "accuracy": 0.98, "cost": 0.09, "device": "gpu"}
     }
 
     # Our hardware constraints (numbers here made up for sake of example)

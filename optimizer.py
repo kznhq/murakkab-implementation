@@ -19,201 +19,296 @@ This MVP uses a **greedy heuristic strategy**:
 For production, this component would evolve to solve a multi-objective optimization
 problem balancing latency, accuracy, cost, and energy under SLO and resource constraints.
 """
+# workflow_optimizer.py
+from __future__ import annotations
+
+import math
+from typing import Dict, Any, List, Optional, Tuple
 
 import networkx as nx
-from typing import Dict, Any, List, Optional
 
 
-class OptimizationError(Exception):
+class OptimizationError(RuntimeError):
     """Raised when workflow optimization fails or SLOs cannot be satisfied."""
 
 
 class WorkflowOptimizer:
     """
-    Profile-Guided Workflow Optimizer (MVP implementation).
+    Profile- and resource-aware Workflow Optimizer.
 
-    Converts a logical DAG (with candidate executors) into a concrete executable
-    workflow plan by selecting one executor per task and annotating estimated
-    runtime metrics.
+    Given:
+      - a logical DAG where each node has a 'candidates' list (Executor-like objects),
+      - model_profiles mapping executor_id -> {latency_ms, accuracy, cost, device, ...},
+      - hardware_resources describing available device types and capacities,
+
+    Produces:
+      - an executable DAG (networkx.DiGraph) annotated per-node with:
+          * selected_executor (id)
+          * executor_type
+          * parameters (defaulted)
+          * hardware (device, memory_gb)
+          * estimated_latency_ms
+          * estimated_cost
+          * estimated_accuracy
+          * optimization_score
+      - graph["summary"] containing total metrics: critical path latency, total cost, min accuracy, meets_slos
+
+    Notes:
+      - This optimizer treats device counts as *concurrency capacity* and does not permanently
+        consume a device slot for static selection. Instead, it verifies that each executor's
+        memory requirement fits the target device capacity.
+      - Critical path (max end time) is used for latency SLO checks.
     """
 
-    def __init__(self, model_profiles: Dict[str, Dict[str, Any]], hardware_resources: Dict[str, Any]):
+    def __init__(self, model_profiles: Dict[str, Dict[str, Any]], hardware_resources: Dict[str, Dict[str, Any]]):
         """
-        Initialize the optimizer.
-
         Args:
-            model_profiles: A dictionary of performance/accuracy/cost profiles keyed by executor ID.
-                Example:
+            model_profiles: Mapping of executor_id -> profile dict with keys:
+                - latency_ms (float)
+                - accuracy (float in [0,1])
+                - cost (float)
+                - device (str) e.g., 'gpu' or 'cpu'
+                (other keys allowed)
+            hardware_resources: Mapping device_type -> resource dict, for example:
                 {
-                    "whisper-v3": {"latency_ms": 500, "accuracy": 0.93, "cost": 0.02, "device": "gpu"},
-                    "frame-extractor-1": {"latency_ms": 150, "accuracy": 0.99, "cost": 0.001, "device": "cpu"}
+                    "gpu": {"count": 2, "memory_gb": 24},
+                    "cpu": {"count": 8, "memory_gb": 128}
                 }
-
-            hardware_resources: Dictionary describing available hardware/resource capacities.
-                Example:
-                {"cpu": {"count": 8, "memory_gb": 32}, "gpu": {"count": 1, "memory_gb": 24}}
         """
         self.model_profiles = model_profiles or {}
         self.hardware_resources = hardware_resources or {}
 
+    # ----------------------------
+    # Public API
+    # ----------------------------
     def optimize(self, logical_dag: nx.DiGraph, user_slos: Dict[str, Any]) -> nx.DiGraph:
         """
-        Optimize the logical workflow DAG into a concrete, executable DAG.
+        Optimize the logical DAG into a concrete executable DAG.
 
         Args:
-            logical_dag: NetworkX DAG produced by `WorkflowOrchestrator.build_logical_plan()`.
-                         Each node must have a `candidates` list of Executor objects.
-            user_slos: Dictionary of service-level objectives, e.g.,
-                       {"latency_ms": 1000, "accuracy": 0.9, "cost": 1.0}
+            logical_dag: networkx.DiGraph where each node attrs contain 'candidates' (list of Executor-like objects).
+            user_slos: dictionary with optional keys: 'latency_ms', 'cost', 'accuracy'.
 
         Returns:
-            nx.DiGraph: Executable DAG annotated with:
-                - selected_executor: Executor ID chosen
-                - parameters: assigned parameter values (defaulted)
-                - hardware: assigned hardware resource
-                - estimated_latency_ms
-                - estimated_cost
-                - estimated_accuracy
+            networkx.DiGraph: executable DAG annotated as described above.
 
         Raises:
-            OptimizationError: if no feasible plan or SLO violation occurs.
+            OptimizationError: when no feasible plan can be found or SLOs cannot be satisfied.
         """
         if not isinstance(logical_dag, nx.DiGraph):
-            raise TypeError("Expected a networkx.DiGraph from orchestrator")
+            raise TypeError("logical_dag must be a networkx.DiGraph")
 
-        executable_dag = logical_dag.copy()
+        # Work on a shallow copy so original logical_dag is not mutated externally
+        executable = logical_dag.copy()
 
-        total_latency = 0.0
-        total_cost = 0.0
-        min_accuracy = 1.0
+        # Per-node selected metadata accumulator
+        node_selection_info: Dict[str, Dict[str, Any]] = {}
 
-        # Step 1: Select executor for each task node
-        for node_name, attrs in executable_dag.nodes(data=True):
+        # For each node, pick the best feasible candidate according to scoring and hardware feasibility
+        for node_name, attrs in executable.nodes(data=True):
             candidates = attrs.get("candidates", [])
             if not candidates:
-                raise OptimizationError(f"No candidate executors available for task '{node_name}'.")
+                raise OptimizationError(f"Node '{node_name}' has no candidate executors.")
 
-            # Greedy heuristic: pick the first candidate
-            selected_executor = candidates[0]
+            best: Optional[Tuple[float, Dict[str, Any]]] = None  # (score, details)
 
-            # Look up profile data
-            profile = self.model_profiles.get(selected_executor.id, {})
-            latency = profile.get("latency_ms", 100)
-            accuracy = profile.get("accuracy", 1.0)
-            cost = profile.get("cost", 0.0)
-            device = profile.get("device", "cpu")
+            for cand in candidates:
+                # Resolve executor id
+                ex_id = getattr(cand, "id", None)
+                if not ex_id:
+                    # skip malformed candidate
+                    continue
 
-            total_latency += latency
-            total_cost += cost
-            min_accuracy = min(min_accuracy, accuracy)
+                profile = self.model_profiles.get(ex_id)
+                if not profile:
+                    # If no profile for this executor, skip candidate (cannot estimate)
+                    continue
 
-            # Assign default parameter values (if known)
-            parameters = {}
-            if hasattr(selected_executor, "parameters") and isinstance(selected_executor.parameters, dict):
-                for p_name, p_type in selected_executor.parameters.items():
-                    if p_type == "int":
-                        parameters[p_name] = 1
-                    elif p_type == "float":
-                        parameters[p_name] = 0.0
-                    elif p_type == "str":
-                        parameters[p_name] = "default"
-                    else:
-                        parameters[p_name] = None
+                # Extract profile fields with safe defaults
+                latency = float(profile.get("latency_ms", 1000.0))
+                accuracy = float(profile.get("accuracy", 1.0))
+                cost = float(profile.get("cost", 0.0))
+                device = profile.get("device", "cpu")
 
-            # Annotate node
-            executable_dag.nodes[node_name].update({
-                "selected_executor": selected_executor.id,
-                "executor_type": getattr(selected_executor, "type", None),
-                "hardware": device,
-                "parameters": parameters,
-                "estimated_latency_ms": latency,
-                "estimated_cost": cost,
-                "estimated_accuracy": accuracy
-            })
+                # Resource requirements declared on executor (optional)
+                resources = getattr(cand, "resources", {}) or {}
+                mem_req = float(resources.get("memory_gb", 0.0))
 
-        # Step 2: Check SLOs
+                # Hardware feasibility: device type must exist and memory requirement must fit.
+                hw_spec = self.hardware_resources.get(device)
+                if hw_spec is None:
+                    # device not available locally -> infeasible for static placement
+                    continue
+                hw_mem = float(hw_spec.get("memory_gb", 0.0))
+                if mem_req > hw_mem:
+                    # candidate requires more memory than any single device of this type provides -> infeasible
+                    continue
+
+                # Candidate is feasible from a hardware-capacity perspective.
+                # Score candidate using normalized metrics.
+                # We normalize latency and cost via a soft transformation so small differences matter.
+                acc_norm = self._clamp(accuracy, 0.0, 1.0)
+                # latency: convert to [0,1] preference where lower latency -> higher score
+                lat_norm = 1.0 / (1.0 + latency)
+                # cost: lower is better
+                cost_norm = 1.0 / (1.0 + cost)
+
+                # Weights: favor accuracy, then latency, then cost (tunable)
+                w_acc, w_lat, w_cost = 0.5, 0.3, 0.2
+
+                score = (w_acc * acc_norm) + (w_lat * lat_norm) + (w_cost * cost_norm)
+
+                details = {
+                    "executor_obj": cand,
+                    "executor_id": ex_id,
+                    "latency": latency,
+                    "accuracy": accuracy,
+                    "cost": cost,
+                    "device": device,
+                    "mem_req": mem_req,
+                    "score": score,
+                }
+
+                if best is None or score > best[0]:
+                    best = (score, details)
+
+            if best is None:
+                # Provide a helpful, actionable error message
+                candidate_ids = [getattr(c, "id", "<no-id>") for c in candidates]
+                available_devices = list(self.hardware_resources.keys())
+                raise OptimizationError(
+                    f"No feasible executor found for node '{node_name}'. "
+                    f"Candidates considered: {candidate_ids}. "
+                    f"Available device types: {available_devices}. "
+                    "Likely reasons: missing model profile, required device not available, "
+                    "or per-device memory insufficient."
+                )
+
+            # Store selection
+            score, sel = best
+            node_selection_info[node_name] = sel
+
+        # Annotate executable DAG nodes with selection and default parameters
+        for node_name, sel in node_selection_info.items():
+            cand = sel["executor_obj"]
+            parameters = self._default_parameters(cand)
+            executable.nodes[node_name].update(
+                {
+                    "selected_executor": sel["executor_id"],
+                    "executor_type": getattr(cand, "type", None),
+                    "parameters": parameters,
+                    "hardware": {"device": sel["device"], "memory_gb": sel["mem_req"]},
+                    "estimated_latency_ms": sel["latency"],
+                    "estimated_cost": sel["cost"],
+                    "estimated_accuracy": sel["accuracy"],
+                    "optimization_score": sel["score"],
+                }
+            )
+
+        # Compute aggregate metrics:
+        # - Critical path latency (longest path sum of node latencies)
+        # - Total cost (sum)
+        # - Min accuracy (min)
+        total_cost = 0.0
+        min_accuracy = 1.0
+        for n, attrs in executable.nodes(data=True):
+            total_cost += float(attrs.get("estimated_cost", 0.0))
+            min_accuracy = min(min_accuracy, float(attrs.get("estimated_accuracy", 1.0)))
+
+        critical_latency = self._compute_critical_path_latency(executable)
+
+        # Validate SLOs
+        slo_violations: List[str] = []
         if user_slos:
-            if "latency_ms" in user_slos and total_latency > user_slos["latency_ms"]:
-                raise OptimizationError(
-                    f"Total estimated latency {total_latency:.1f}ms exceeds SLO limit {user_slos['latency_ms']}ms."
-                )
-            if "cost" in user_slos and total_cost > user_slos["cost"]:
-                raise OptimizationError(
-                    f"Total estimated cost {total_cost:.3f} exceeds SLO cost limit {user_slos['cost']}."
-                )
-            if "accuracy" in user_slos and min_accuracy < user_slos["accuracy"]:
-                raise OptimizationError(
-                    f"Minimum accuracy {min_accuracy:.3f} falls below required SLO {user_slos['accuracy']}."
-                )
+            if "latency_ms" in user_slos and critical_latency > float(user_slos["latency_ms"]):
+                slo_violations.append(f"Critical-path latency {critical_latency:.1f}ms > SLO {user_slos['latency_ms']}ms")
+            if "cost" in user_slos and total_cost > float(user_slos["cost"]):
+                slo_violations.append(f"Total cost {total_cost:.3f} > SLO {user_slos['cost']}")
+            if "accuracy" in user_slos and min_accuracy < float(user_slos["accuracy"]):
+                slo_violations.append(f"Min accuracy {min_accuracy:.3f} < SLO {user_slos['accuracy']}")
 
-        # Step 3: Annotate overall workflow metrics
-        executable_dag.graph["summary"] = {
-            "total_latency_ms": total_latency,
-            "total_cost": total_cost,
-            "min_accuracy": min_accuracy,
-            "meets_slos": True
+            if slo_violations:
+                # Provide summary and per-node metadata to help debugging
+                summary_lines = ["SLO violations detected:"]
+                summary_lines.extend(f" - {v}" for v in slo_violations)
+                # Build a compact node summary
+                node_summaries = []
+                for n, a in executable.nodes(data=True):
+                    node_summaries.append(
+                        f"{n}: exec={a.get('selected_executor')}, lat={a.get('estimated_latency_ms')}, acc={a.get('estimated_accuracy')}, cost={a.get('estimated_cost')}"
+                    )
+                summary_lines.append("Node selections:")
+                summary_lines.extend(f"   {s}" for s in node_summaries)
+                raise OptimizationError("\n".join(summary_lines))
+
+        # Annotate graph summary
+        executable.graph["summary"] = {
+            "critical_path_latency_ms": round(critical_latency, 2),
+            "total_cost": round(total_cost, 4),
+            "min_accuracy": round(min_accuracy, 4),
+            "meets_slos": True,
         }
 
-        return executable_dag
+        return executable
 
+    # ----------------------------
+    # Helper utilities
+    # ----------------------------
+    @staticmethod
+    def _clamp(x: float, lo: float, hi: float) -> float:
+        return max(lo, min(hi, x))
 
-# --- Example Usage / Unit Test Harness ---
-if __name__ == "__main__":
-    from dataclasses import dataclass
-    from workflow_orchestrator import WorkflowOrchestrator
-    from workflow_orchestrator import ExecutorLibrary, Executor
-    from workflow_dag_builder import build_workflow_dag
+    @staticmethod
+    def _default_parameters(executor_obj: Any) -> Dict[str, Any]:
+        """
+        Instantiate conservative default parameter values for a candidate's parameter schema.
+        Executor objects may or may not have a 'parameters' dict describing parameter types.
+        """
+        params = {}
+        schema = getattr(executor_obj, "parameters", None)
+        if not schema or not isinstance(schema, dict):
+            return params
 
-    # 1. Define example workflow spec
-    example_workflow = {
-        "nodes": [
-            {"name": "scene_detect", "inputs": ["videos"], "outputs": ["scenes", "audio"]},
-            {"name": "frame_extract", "inputs": ["scenes"], "outputs": ["frames"]},
-            {"name": "speech_to_text", "inputs": ["audio"], "outputs": ["text"]}
-        ],
-        "edges": [
-            {"from": "scene_detect", "to": "frame_extract", "data": "scenes"},
-            {"from": "scene_detect", "to": "speech_to_text", "data": "audio"}
-        ]
-    }
+        for k, v in schema.items():
+            t = (v or "").lower()
+            if t == "int":
+                params[k] = 1
+            elif t == "float":
+                params[k] = 0.0
+            elif t == "str":
+                params[k] = "default"
+            else:
+                params[k] = None
+        return params
 
-    # 2. Register executors
-    lib = ExecutorLibrary()
-    lib.register_executor(Executor(id="scene-net-v1", type="mlmodel", inputs=["videos"], outputs=["scenes", "audio"]))
-    lib.register_executor(Executor(id="frame-extractor-1", type="tool", inputs=["scenes"], outputs=["frames"]))
-    lib.register_executor(Executor(id="whisper-v3", type="mlmodel", inputs=["audio"], outputs=["text"]))
+    @staticmethod
+    def _compute_critical_path_latency(dag: nx.DiGraph) -> float:
+        """
+        Compute the critical path (longest-path) latency of a DAG where each node's
+        weight is the node's estimated latency (ms). Returns the maximum end time.
 
-    # 3. Build logical DAG via orchestrator
-    orchestrator = WorkflowOrchestrator(lib)
-    logical_plan = orchestrator.build_logical_plan(example_workflow)
+        Approach:
+            - Topologically order nodes.
+            - For each node, earliest_start = max(earliest_finish of predecessors) (0 if none)
+            - earliest_finish = earliest_start + node_latency
+            - critical path = max(earliest_finish)
+        """
+        if not nx.is_directed_acyclic_graph(dag):
+            raise ValueError("DAG must be acyclic to compute critical path latency.")
 
-    # 4. Define model profiles (mock data)
-    model_profiles = {
-        "scene-net-v1": {"latency_ms": 400, "accuracy": 0.92, "cost": 0.03, "device": "gpu"},
-        "frame-extractor-1": {"latency_ms": 150, "accuracy": 0.99, "cost": 0.005, "device": "cpu"},
-        "whisper-v3": {"latency_ms": 500, "accuracy": 0.95, "cost": 0.02, "device": "gpu"}
-    }
+        topo = list(nx.topological_sort(dag))
+        earliest_finish: Dict[str, float] = {}
 
-    hardware_resources = {"cpu": {"count": 8}, "gpu": {"count": 1}}
+        for n in topo:
+            latency = float(dag.nodes[n].get("estimated_latency_ms", 0.0))
+            preds = list(dag.predecessors(n))
+            if not preds:
+                start = 0.0
+            else:
+                start = max(earliest_finish.get(p, 0.0) for p in preds)
+            earliest_finish[n] = start + latency
 
-    # 5. Optimize workflow
-    optimizer = WorkflowOptimizer(model_profiles, hardware_resources)
-    slos = {"latency_ms": 2000, "accuracy": 0.9, "cost": 0.1}
-
-    executable_plan = optimizer.optimize(logical_plan, slos)
-
-    # 6. Display final executable DAG
-    print("\n=== Executable Workflow Plan ===")
-    for n, data in executable_plan.nodes(data=True):
-        print(f"Task: {n}")
-        print(f"  Executor: {data['selected_executor']} ({data['executor_type']})")
-        print(f"  Hardware: {data['hardware']}")
-        print(f"  Latency: {data['estimated_latency_ms']} ms")
-        print(f"  Accuracy: {data['estimated_accuracy']}")
-        print(f"  Cost: {data['estimated_cost']}")
-        print("  Params:", data.get("parameters", {}))
-        print()
-
-    print("=== Workflow Summary ===")
-    print(executable_plan.graph["summary"])
+        if not earliest_finish:
+            return 0.0
+        return max(earliest_finish.values())
 
