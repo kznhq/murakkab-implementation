@@ -1,5 +1,7 @@
 # Murakkab Implementation
-Implementing Murakkab from the [paper](https://arxiv.org/pdf/2508.18298)
+Rough implementation of Murakkab from the [paper](https://arxiv.org/pdf/2508.18298)
+
+Not actively developing anymore because we pivoted.
 
 ## Architecture/Sequence of events
 1. workflow (JSON)
@@ -10,10 +12,8 @@ Implementing Murakkab from the [paper](https://arxiv.org/pdf/2508.18298)
 4. define some profiles, resources, SLOs then use workflow_optimizer.WorkflowOptimizer(profiles: dict, resources: dict) and WorkflowOptimizer.optimize(logical DAG, SLOs)
     - examples in example.py but basically a bunch of dicts defining profiles of the executors, the resources, and the SLOs
     - optimize() will select one of the candidates to use for actual execution
-    - TODO: currently just does greedy approach of using first candidate listed, need to flesh it out to actually optimize
 5. dispatcher.execute(DAG from optimize() step, initial inputs: JSON) then answer is printed
     - currently simulates tool calls
-    - TODO: make it actually run tools
 
 ## To run:
 example.py goes through an example of how to setup workflow, initial inputs, etc.
@@ -22,12 +22,6 @@ pip install -r requirements.txt
 python3 example.py
 ```
 Note: The pip install is only to make sure you have the proper packages.
-
-## Other TODOs maybe:
-- make REST endpoints or equivalent so that you can register workflows and execute workflows with different calls
-- scaling?
-- dynamic profiling that updates the profiles used by optimizer
-    - also just measuring performance/profiling in general
 
 ## Output from example.py
 ```
